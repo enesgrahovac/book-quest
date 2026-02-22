@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "setup": "bash scripts/setup-local.sh",
     "start:local": "bash scripts/start-local.sh",
     "stop:local": "bash scripts/stop-local.sh",
