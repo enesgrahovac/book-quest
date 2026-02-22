@@ -1,0 +1,2 @@
+-- Seed is intentionally minimal for first-run local setup.
+-- Add sample course content and demo learners in later milestones.
