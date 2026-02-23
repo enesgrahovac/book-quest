@@ -67,6 +67,7 @@ export default function OnboardingPage() {
   const [networkState, setNetworkState] = useState<NetworkState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [finalResult, setFinalResult] = useState<FinalizeResponse | null>(null);
+  const [modifierKeyLabel, setModifierKeyLabel] = useState<"Ctrl" | "Cmd">("Ctrl");
 
   const chatPanelRef = useRef<HTMLDivElement>(null);
 
@@ -96,6 +97,12 @@ export default function OnboardingPage() {
       panel.scrollTop = panel.scrollHeight;
     }
   }, [messages, networkState]);
+
+  useEffect(() => {
+    if (/Mac|iPhone|iPad|iPod/.test(navigator.userAgent)) {
+      setModifierKeyLabel("Cmd");
+    }
+  }, []);
 
   const appendAssistantDelta = useCallback((chunk: string) => {
     if (!chunk) {
@@ -362,7 +369,7 @@ export default function OnboardingPage() {
               placeholder="Type your response with as much detail as you want..."
             />
             <span className="keyboardHint">
-              Press {typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent) ? "Cmd" : "Ctrl"}+Enter to send
+              Press {modifierKeyLabel}+Enter to send
             </span>
           </label>
           <div className="buttonRow">
