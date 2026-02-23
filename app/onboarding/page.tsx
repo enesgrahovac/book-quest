@@ -59,6 +59,17 @@ function parseSseBlock(block: string) {
   };
 }
 
+function nextSseDelimiter(buffer: string) {
+  const match = buffer.match(/\r?\n\r?\n/);
+  if (!match || typeof match.index !== "number") {
+    return null;
+  }
+  return {
+    index: match.index,
+    length: match[0].length
+  };
+}
+
 export default function OnboardingPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draftAnswer, setDraftAnswer] = useState("");
@@ -156,6 +167,7 @@ export default function OnboardingPage() {
     const decoder = new TextDecoder();
     let buffer = "";
     let donePayload: AgentNextResponse | null = null;
+    let streamError: string | null = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -163,11 +175,11 @@ export default function OnboardingPage() {
         buffer += decoder.decode(value, { stream: !done });
       }
 
-      let splitIndex = buffer.indexOf("\n\n");
-      while (splitIndex >= 0) {
-        const block = buffer.slice(0, splitIndex);
-        buffer = buffer.slice(splitIndex + 2);
-        splitIndex = buffer.indexOf("\n\n");
+      let separator = nextSseDelimiter(buffer);
+      while (separator) {
+        const block = buffer.slice(0, separator.index);
+        buffer = buffer.slice(separator.index + separator.length);
+        separator = nextSseDelimiter(buffer);
 
         const parsedBlock = parseSseBlock(block);
         if (!parsedBlock) {
@@ -179,7 +191,36 @@ export default function OnboardingPage() {
             const payload = JSON.parse(parsedBlock.data) as AgentStreamDelta;
             if (typeof payload.chunk === "string") {
               onDelta(payload.chunk);
+              // Yield to avoid React batching all coalesced deltas into one paint.
+              await new Promise<void>((resolve) => {
+                setTimeout(resolve, 0);
+              });
             }
+            continue;
+          }
+
+          if (parsedBlock.event === "meta") {
+            const payload = JSON.parse(parsedBlock.data) as {
+              readyToFinalize?: unknown;
+              knownGaps?: unknown;
+            };
+            if (typeof payload.readyToFinalize === "boolean") {
+              setReadyToFinalize(payload.readyToFinalize);
+            }
+            if (Array.isArray(payload.knownGaps)) {
+              setKnownGaps(
+                payload.knownGaps.filter((gap): gap is string => typeof gap === "string" && gap.trim().length > 0)
+              );
+            }
+            continue;
+          }
+
+          if (parsedBlock.event === "error") {
+            const payload = JSON.parse(parsedBlock.data) as { message?: unknown };
+            streamError =
+              typeof payload.message === "string" && payload.message.trim().length > 0
+                ? payload.message
+                : "Unexpected stream error.";
             continue;
           }
 
@@ -197,6 +238,10 @@ export default function OnboardingPage() {
       }
     }
 
+    if (streamError) {
+      throw new Error(streamError);
+    }
+
     if (!donePayload) {
       throw new Error("Tutor stream ended without a final payload.");
     }
@@ -212,7 +257,7 @@ export default function OnboardingPage() {
     setKnownGaps([]);
 
     try {
-      setMessages([{ role: "assistant", content: "" }]);
+      setMessages([]);
       const next = await requestNextQuestionStream([], appendAssistantDelta);
       setMessages([{ role: "assistant", content: next.assistantMessage }]);
       setReadyToFinalize(next.readyToFinalize);
@@ -235,7 +280,7 @@ export default function OnboardingPage() {
     const previousConversation = messages;
     const userMessage: ChatMessage = { role: "user", content: draftAnswer.trim() };
     const updatedConversation = [...previousConversation, userMessage];
-    setMessages([...updatedConversation, { role: "assistant", content: "" }]);
+    setMessages(updatedConversation);
     setDraftAnswer("");
 
     try {
@@ -345,7 +390,7 @@ export default function OnboardingPage() {
             ))
           )}
 
-          {networkState === "loading" ? (
+          {networkState === "loading" && messages[messages.length - 1]?.role !== "assistant" ? (
             <div className="typingIndicator">
               <span className="chatRoleIcon" style={{ background: "var(--accent)" }}>T</span>
               <div className="typingDots">

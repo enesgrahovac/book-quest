@@ -27,37 +27,19 @@ function isValidMessage(value: unknown): value is ConversationMessage {
 
 function chunkMessageForStream(message: string) {
   const tokens = message.match(/\S+\s*/g) ?? [];
-  if (!tokens.length) {
-    return [message];
-  }
-
-  const chunks: string[] = [];
-  let current = "";
-
-  for (const token of tokens) {
-    if ((current + token).length > 28 && current) {
-      chunks.push(current);
-      current = token;
-      continue;
-    }
-    current += token;
-  }
-
-  if (current) {
-    chunks.push(current);
-  }
-
-  return chunks;
+  return tokens.length ? tokens : [message];
 }
 
 function toSseEvent(event: string, payload: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
 
-function streamNextResponse(next: Awaited<ReturnType<typeof generateNextOnboardingQuestion>>) {
-  const chunks = chunkMessageForStream(next.question);
+function streamNextResponse(
+  nextPromise: Promise<Awaited<ReturnType<typeof generateNextOnboardingQuestion>>>
+) {
   const encoder = new TextEncoder();
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let cancelled = false;
 
   const stream = new ReadableStream({
     start(controller) {
@@ -65,31 +47,55 @@ function streamNextResponse(next: Awaited<ReturnType<typeof generateNextOnboardi
         controller.enqueue(encoder.encode(toSseEvent(event, payload)));
       };
 
-      let index = 0;
+      send("meta", { status: "started" });
 
-      const pushChunk = () => {
-        if (index >= chunks.length) {
-          send("done", {
-            assistantMessage: next.question,
-            readyToFinalize: next.readyToFinalize,
-            knownGaps: next.knownGaps
-          });
-          controller.close();
+      const run = async () => {
+        const next = await nextPromise;
+        const chunks = chunkMessageForStream(next.question);
+
+        if (cancelled) {
           return;
         }
 
-        send("delta", { chunk: chunks[index] });
-        index += 1;
-        timer = setTimeout(pushChunk, 30);
+        send("meta", {
+          readyToFinalize: next.readyToFinalize,
+          knownGaps: next.knownGaps
+        });
+
+        for (const chunk of chunks) {
+          if (cancelled) {
+            return;
+          }
+
+          send("delta", { chunk });
+          await new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 45);
+          });
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        send("done", {
+          assistantMessage: next.question,
+          readyToFinalize: next.readyToFinalize,
+          knownGaps: next.knownGaps
+        });
+        controller.close();
       };
 
-      send("meta", {
-        readyToFinalize: next.readyToFinalize,
-        knownGaps: next.knownGaps
+      run().catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Unexpected onboarding error.";
+        send("error", { message });
+        controller.close();
       });
-      pushChunk();
     },
     cancel() {
+      cancelled = true;
       if (timer) {
         clearTimeout(timer);
       }
@@ -100,7 +106,8 @@ function streamNextResponse(next: Awaited<ReturnType<typeof generateNextOnboardi
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive"
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
     }
   });
 }
@@ -131,11 +138,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const next = await generateNextOnboardingQuestion(messages);
     if (mode === "next" && stream) {
-      return streamNextResponse(next);
+      return streamNextResponse(generateNextOnboardingQuestion(messages));
     }
 
+    const next = await generateNextOnboardingQuestion(messages);
     return NextResponse.json({
       mode,
       assistantMessage: next.question,
