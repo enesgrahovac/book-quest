@@ -1,3 +1,6 @@
+import { generateObject } from "ai";
+import { z } from "zod";
+
 import {
   applyOnboardingAnswers,
   applyPartialOnboardingUpdate,
@@ -13,6 +16,8 @@ import {
   type TutorCharacter
 } from "@/lib/state/onboarding";
 
+import { getModel } from "./model";
+
 export type ConversationMessage = {
   role: "assistant" | "user";
   content: string;
@@ -23,89 +28,6 @@ type NextQuestionPayload = {
   readyToFinalize: boolean;
   knownGaps: string[];
 };
-
-function normalizeContent(content: unknown) {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((chunk) => {
-        if (!chunk || typeof chunk !== "object") {
-          return "";
-        }
-        const value = (chunk as { text?: unknown }).text;
-        return typeof value === "string" ? value : "";
-      })
-      .join("\n");
-  }
-
-  return "";
-}
-
-function parseJsonContent<T>(raw: string): T | null {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(trimmed) as T;
-  } catch {
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (!fencedMatch) {
-      return null;
-    }
-    try {
-      return JSON.parse(fencedMatch[1]) as T;
-    } catch {
-      return null;
-    }
-  }
-}
-
-async function callOpenAIJson<T>(messages: Array<{ role: "system" | "user"; content: string }>) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is missing.");
-  }
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL ?? "gpt-5.2",
-      messages,
-      response_format: { type: "json_object" },
-      temperature: 0.3
-    })
-  });
-
-  if (!response.ok) {
-    const details = await response.text();
-    throw new Error(`OpenAI request failed (${response.status}): ${details}`);
-  }
-
-  const payload = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: unknown;
-      };
-    }>;
-  };
-
-  const content = normalizeContent(payload.choices?.[0]?.message?.content);
-  const parsed = parseJsonContent<T>(content);
-  if (!parsed) {
-    throw new Error("Failed to parse JSON from model response.");
-  }
-
-  return parsed;
-}
 
 function normalizeMessages(messages: ConversationMessage[]) {
   return messages
@@ -218,13 +140,7 @@ export async function generateNextOnboardingQuestion(messages: ConversationMessa
     "- How they prefer to be corrected (just tell me vs. nudge me to figure it out vs. a mix)",
     "- What teaching vibe they like (encouraging & warm, strict & direct, calm & patient, or high-energy & fast)",
     "- Whether they prefer short explanations or deep walkthroughs",
-    "- Whether practice questions should feel comfortable, just right, or challenging",
-    "",
-    "Return JSON only with keys: question, readyToFinalize, knownGaps.",
-    "question = your next conversational message (as the tutor, in first person).",
-    "readyToFinalize = true only when all areas above are reasonably covered.",
-    "knownGaps = short, friendly list of what you still want to learn about the student.",
-    "Write each gap in second person (e.g. 'Your learning goals' not 'What they want to learn')."
+    "- Whether practice questions should feel comfortable, just right, or challenging"
   ].join("\n");
 
   const userPrompt = [
@@ -236,10 +152,17 @@ export async function generateNextOnboardingQuestion(messages: ConversationMessa
   ].join("\n");
 
   try {
-    const response = await callOpenAIJson<NextQuestionPayload>([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt }
-    ]);
+    const { object: response } = await generateObject({
+      model: getModel(),
+      system: systemPrompt,
+      prompt: userPrompt,
+      temperature: 0.3,
+      schema: z.object({
+        question: z.string(),
+        readyToFinalize: z.boolean(),
+        knownGaps: z.array(z.string())
+      })
+    });
 
     return {
       question: ensureString(response.question, fallbackNextQuestion(cleanMessages).question),
@@ -250,21 +173,6 @@ export async function generateNextOnboardingQuestion(messages: ConversationMessa
     return fallbackNextQuestion(cleanMessages);
   }
 }
-
-type ExtractionPayload = {
-  displayName?: string;
-  educationLevel?: string;
-  educationBackground?: string;
-  primaryGoal?: string;
-  weeklyHours?: number;
-  knownTopics?: string[];
-  interests?: string[];
-  explanationDepth?: string;
-  challengeLevel?: string;
-  tutorCharacter?: string;
-  correctionStyle?: string;
-  personaPreferenceNotes?: string[];
-};
 
 export async function finalizeOnboardingFromConversation(
   userId: string,
@@ -278,14 +186,7 @@ export async function finalizeOnboardingFromConversation(
   } else {
     const systemPrompt = [
       "You extract structured onboarding data for Book Quest.",
-      "Map conversation into JSON only with keys:",
-      "displayName, educationLevel, educationBackground, primaryGoal, weeklyHours, knownTopics, interests, explanationDepth, challengeLevel, tutorCharacter, correctionStyle, personaPreferenceNotes.",
-      "Enum constraints:",
-      `explanationDepth: ${EXPLANATION_DEPTHS.join("|")}`,
-      `challengeLevel: ${CHALLENGE_LEVELS.join("|")}`,
-      `tutorCharacter: ${TUTOR_CHARACTERS.join("|")}`,
-      `correctionStyle: ${CORRECTION_STYLES.join("|")}`,
-      "personaPreferenceNotes should be a short list of explicit tutor personality requests from the learner.",
+      "Map conversation into the requested JSON structure.",
       "If unknown, choose sensible defaults, but preserve user-provided detail in educationBackground."
     ].join("\n");
 
@@ -294,10 +195,26 @@ export async function finalizeOnboardingFromConversation(
     );
 
     try {
-      const parsed = await callOpenAIJson<ExtractionPayload>([
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ]);
+      const { object: parsed } = await generateObject({
+        model: getModel(),
+        system: systemPrompt,
+        prompt: userPrompt,
+        temperature: 0.3,
+        schema: z.object({
+          displayName: z.string(),
+          educationLevel: z.string(),
+          educationBackground: z.string(),
+          primaryGoal: z.string(),
+          weeklyHours: z.number(),
+          knownTopics: z.array(z.string()),
+          interests: z.array(z.string()),
+          explanationDepth: z.enum(EXPLANATION_DEPTHS),
+          challengeLevel: z.enum(CHALLENGE_LEVELS),
+          tutorCharacter: z.enum(TUTOR_CHARACTERS),
+          correctionStyle: z.enum(CORRECTION_STYLES),
+          personaPreferenceNotes: z.array(z.string())
+        })
+      });
 
       extracted = {
         displayName: ensureString(parsed.displayName, "Learner"),
@@ -373,10 +290,7 @@ export async function extractProgressiveUpdate(
 
   const systemPrompt = [
     "Extract whatever you can about this learner from the conversation so far.",
-    "Return JSON with ONLY the fields you are confident about. Use null for anything unknown.",
-    "Keys: displayName, educationLevel, educationBackground, primaryGoal, weeklyHours,",
-    "knownTopics (string[]), interests (string[]), explanationDepth, challengeLevel,",
-    "tutorCharacter, correctionStyle, personaPreferenceNotes (string[]).",
+    "Return ONLY the fields you are confident about. Use null for anything unknown.",
     "",
     "For enum fields, map naturally from conversation:",
     "- tutorCharacter: supportive-coach | strict-professor | calm-mentor | energetic-guide",
@@ -384,7 +298,7 @@ export async function extractProgressiveUpdate(
     "- explanationDepth: concise | deep",
     "- challengeLevel: easy | balanced | stretch",
     "",
-    "Only set a field if the student clearly indicated it. Omit or null otherwise."
+    "Only set a field if the student clearly indicated it. Use null otherwise."
   ].join("\n");
 
   const userPrompt = [
@@ -393,10 +307,26 @@ export async function extractProgressiveUpdate(
   ].join("\n");
 
   try {
-    const parsed = await callOpenAIJson<PartialOnboardingAnswers>([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt }
-    ]);
+    const { object: parsed } = await generateObject({
+      model: getModel(),
+      system: systemPrompt,
+      prompt: userPrompt,
+      temperature: 0.3,
+      schema: z.object({
+        displayName: z.string().nullable().optional(),
+        educationLevel: z.string().nullable().optional(),
+        educationBackground: z.string().nullable().optional(),
+        primaryGoal: z.string().nullable().optional(),
+        weeklyHours: z.number().nullable().optional(),
+        knownTopics: z.array(z.string()).nullable().optional(),
+        interests: z.array(z.string()).nullable().optional(),
+        explanationDepth: z.enum(EXPLANATION_DEPTHS).nullable().optional(),
+        challengeLevel: z.enum(CHALLENGE_LEVELS).nullable().optional(),
+        tutorCharacter: z.enum(TUTOR_CHARACTERS).nullable().optional(),
+        correctionStyle: z.enum(CORRECTION_STYLES).nullable().optional(),
+        personaPreferenceNotes: z.array(z.string()).nullable().optional()
+      })
+    });
 
     // Filter out null values
     const cleaned: PartialOnboardingAnswers = {};

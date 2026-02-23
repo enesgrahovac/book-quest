@@ -3,7 +3,8 @@
     "allow": [
       "Bash(cd \"/Users/enes/Documents/Software Development/book-quest\" && npm run lint 2>&1)",
       "Bash(cd \"/Users/enes/Documents/Software Development/book-quest\" && npm run typecheck 2>&1)",
-      "Bash(cd \"/Users/enes/Documents/Software Development/book-quest\" && npm run build 2>&1)"
+      "Bash(cd \"/Users/enes/Documents/Software Development/book-quest\" && npm run build 2>&1)",
+      "Bash(cd:*)"
     ]
   }
 }

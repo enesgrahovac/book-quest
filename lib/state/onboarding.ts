@@ -1,6 +1,9 @@
+import { generateObject } from "ai";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
+import { z } from "zod";
 
+import { getModel } from "../ai/model";
 import { readUserStateDoc, writeUserStateDoc } from "./userState";
 
 export const TUTOR_CHARACTERS = [
@@ -39,7 +42,6 @@ const LLM_EDITABLE_DOC_KEYS = ["PROFILE", "PREFERENCES", "MEMORY"] as const;
 type OnboardingDocKey = (typeof LLM_EDITABLE_DOC_KEYS)[number];
 
 type OnboardingDocSources = Record<(typeof ONBOARDING_DOC_KEYS)[number], string>;
-type LlmDocPayload = Partial<Record<OnboardingDocKey, unknown>>;
 
 const characterLabels: Record<TutorCharacter, string> = {
   "supportive-coach": "Supportive coach",
@@ -130,89 +132,6 @@ function markdownSafeLine(value: string) {
   return value.trim().replace(/\r?\n/g, " ");
 }
 
-function normalizeContent(content: unknown) {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((chunk) => {
-        if (!chunk || typeof chunk !== "object") {
-          return "";
-        }
-        const value = (chunk as { text?: unknown }).text;
-        return typeof value === "string" ? value : "";
-      })
-      .join("\n");
-  }
-
-  return "";
-}
-
-function parseJsonContent<T>(raw: string): T | null {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(trimmed) as T;
-  } catch {
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (!fencedMatch) {
-      return null;
-    }
-    try {
-      return JSON.parse(fencedMatch[1]) as T;
-    } catch {
-      return null;
-    }
-  }
-}
-
-async function callOpenAIJson<T>(messages: Array<{ role: "system" | "user"; content: string }>) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is missing.");
-  }
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-      messages,
-      response_format: { type: "json_object" },
-      temperature: 0.2
-    })
-  });
-
-  if (!response.ok) {
-    const details = await response.text();
-    throw new Error(`OpenAI request failed (${response.status}): ${details}`);
-  }
-
-  const payload = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: unknown;
-      };
-    }>;
-  };
-
-  const content = normalizeContent(payload.choices?.[0]?.message?.content);
-  const parsed = parseJsonContent<T>(content);
-  if (!parsed) {
-    throw new Error("Failed to parse JSON from model response.");
-  }
-
-  return parsed;
-}
-
 function normalizeModelDoc(value: unknown) {
   if (typeof value !== "string") {
     return null;
@@ -289,10 +208,17 @@ async function rewriteOnboardingDocsWithLlm(
   ].join("\n");
 
   try {
-    const parsed = await callOpenAIJson<LlmDocPayload>([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt }
-    ]);
+    const { object: parsed } = await generateObject({
+      model: getModel(),
+      system: systemPrompt,
+      prompt: userPrompt,
+      temperature: 0.2,
+      schema: z.object({
+        PROFILE: z.string(),
+        PREFERENCES: z.string(),
+        MEMORY: z.string()
+      })
+    });
 
     const output: Partial<Record<OnboardingDocKey, string>> = {};
 
