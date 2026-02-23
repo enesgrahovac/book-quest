@@ -27,3 +27,7 @@ supabase/.temp/
 
 # Local runtime markers
 .book-quest-initialized
+
+# Generated learner markdown state (templates stay committed under state/templates/)
+state/users/*
+!state/users/.gitkeep

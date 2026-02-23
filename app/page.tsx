@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const features = [
   "Create courses from PDFs or from scratch with AI",
   "Unlock-based progression through lessons and assessments",
@@ -16,6 +18,14 @@ export default function HomePage() {
           Build personalized courses, move at your own pace, and keep a persistent tutor that
           learns how you learn.
         </p>
+        <div className="buttonRow">
+          <Link href="/onboarding" className="ctaLink">
+            Start onboarding
+          </Link>
+          <Link href="/state/local-learner" className="ghostLink">
+            Open sample state editor
+          </Link>
+        </div>
       </section>
 
       <section>
