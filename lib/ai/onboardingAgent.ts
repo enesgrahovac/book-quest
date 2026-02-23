@@ -47,7 +47,7 @@ function transcriptString(messages: ConversationMessage[]) {
 function fallbackNextQuestion(messages: ConversationMessage[]): NextQuestionPayload {
   const userAnswers = messages.filter((message) => message.role === "user");
   const steps = [
-    "Hey there! I'm your Book Quest tutor — excited to meet you! What's your name, and can you tell me a bit about your education background? Like, where you went to school or what you've studied so far.",
+    "Hey there! I'm your Book Quest tutor — excited to meet you! What's your name, and what do you do? Tell me a bit about yourself (and if you're currently studying something, I'd love to hear about that too).",
     "Awesome, thanks for sharing that! So what's the main thing you're hoping to learn or get better at? And roughly how many hours a week do you think you can set aside for studying?",
     "Got it! Are there any topics you already feel pretty solid on? And what are some of your hobbies or interests? I like to work those into examples to make things click better.",
     "This is really helpful! Now, when you get something wrong, would you rather I just tell you the answer and explain why, or would you prefer I give you a nudge so you can figure it out yourself? Also, what kind of vibe works best for you — someone who's super encouraging, more no-nonsense and direct, calm and patient, or high-energy and fast-paced?",
