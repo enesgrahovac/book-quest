@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  extractProgressiveUpdate,
   finalizeOnboardingFromConversation,
   generateNextOnboardingQuestion,
   type ConversationMessage
@@ -136,6 +137,11 @@ export async function POST(request: NextRequest) {
         answers: result.answers,
         updatedDocs: result.docs.map((doc) => ({ key: doc.key, updatedAt: doc.updatedAt }))
       });
+    }
+
+    if (mode === "next") {
+      // Fire-and-forget: progressively extract and persist partial persona
+      extractProgressiveUpdate(userId, messages).catch(() => {});
     }
 
     if (mode === "next" && stream) {

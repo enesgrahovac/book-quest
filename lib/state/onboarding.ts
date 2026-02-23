@@ -1,3 +1,6 @@
+import { mkdir, readFile, writeFile } from "fs/promises";
+import path from "path";
+
 import { readUserStateDoc, writeUserStateDoc } from "./userState";
 
 export const TUTOR_CHARACTERS = [
@@ -485,4 +488,97 @@ export async function applyOnboardingAnswers(userId: string, answers: Onboarding
   );
 
   return [profileDoc, preferencesDoc, personaDoc, memoryDoc];
+}
+
+// ---------------------------------------------------------------------------
+// Progressive onboarding state (sidecar file)
+// ---------------------------------------------------------------------------
+
+export type PartialOnboardingAnswers = {
+  [K in keyof OnboardingAnswers]?: OnboardingAnswers[K] | null;
+};
+
+function onboardingStatePath(userId: string) {
+  const rootDir = path.resolve(process.cwd(), process.env.BOOK_QUEST_STATE_DIR ?? "state/users");
+  return path.join(rootDir, userId, "_onboarding_state.json");
+}
+
+export async function readOnboardingState(userId: string): Promise<PartialOnboardingAnswers> {
+  try {
+    const raw = await readFile(onboardingStatePath(userId), "utf8");
+    return JSON.parse(raw) as PartialOnboardingAnswers;
+  } catch {
+    return {};
+  }
+}
+
+export async function writeOnboardingState(
+  userId: string,
+  state: PartialOnboardingAnswers
+): Promise<void> {
+  const filePath = onboardingStatePath(userId);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, JSON.stringify(state, null, 2), "utf8");
+}
+
+export async function applyPartialOnboardingUpdate(
+  userId: string,
+  partial: PartialOnboardingAnswers
+): Promise<void> {
+  const current = await readOnboardingState(userId);
+
+  // Merge: only overwrite with non-null values
+  for (const key of Object.keys(partial) as Array<keyof OnboardingAnswers>) {
+    const value = partial[key];
+    if (value !== null && value !== undefined) {
+      (current as Record<string, unknown>)[key] = value;
+    }
+  }
+
+  await writeOnboardingState(userId, current);
+
+  // Build and write TUTOR_PERSONA.md with whatever we have so far
+  const merged = buildDefaultsFromPartial(current);
+  await writeUserStateDoc(userId, "TUTOR_PERSONA", buildTutorPersonaMarkdown(merged));
+
+  // If we have enough fields, also write PROFILE.md and PREFERENCES.md
+  if (merged.displayName !== "Learner" || merged.primaryGoal !== "Not shared yet") {
+    await writeUserStateDoc(userId, "PROFILE", buildProfileMarkdown(merged));
+    await writeUserStateDoc(userId, "PREFERENCES", buildPreferencesMarkdown(merged));
+  }
+}
+
+function buildDefaultsFromPartial(partial: PartialOnboardingAnswers): OnboardingAnswers {
+  return {
+    displayName: (partial.displayName as string) || "Learner",
+    educationLevel: (partial.educationLevel as string) || "Unknown",
+    educationBackground: (partial.educationBackground as string) || "Not shared yet",
+    primaryGoal: (partial.primaryGoal as string) || "Not shared yet",
+    weeklyHours: typeof partial.weeklyHours === "number" ? partial.weeklyHours : 5,
+    knownTopics: Array.isArray(partial.knownTopics) ? partial.knownTopics : [],
+    interests: Array.isArray(partial.interests) ? partial.interests : [],
+    explanationDepth: (EXPLANATION_DEPTHS as readonly string[]).includes(
+      partial.explanationDepth as string
+    )
+      ? (partial.explanationDepth as ExplanationDepth)
+      : "deep",
+    challengeLevel: (CHALLENGE_LEVELS as readonly string[]).includes(
+      partial.challengeLevel as string
+    )
+      ? (partial.challengeLevel as ChallengeLevel)
+      : "balanced",
+    tutorCharacter: (TUTOR_CHARACTERS as readonly string[]).includes(
+      partial.tutorCharacter as string
+    )
+      ? (partial.tutorCharacter as TutorCharacter)
+      : "supportive-coach",
+    correctionStyle: (CORRECTION_STYLES as readonly string[]).includes(
+      partial.correctionStyle as string
+    )
+      ? (partial.correctionStyle as CorrectionStyle)
+      : "mixed",
+    personaPreferenceNotes: Array.isArray(partial.personaPreferenceNotes)
+      ? partial.personaPreferenceNotes
+      : []
+  };
 }

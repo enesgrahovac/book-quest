@@ -343,11 +343,10 @@ export default function OnboardingPage() {
   return (
     <main className="page">
       <section className="hero">
-        <p className="eyebrow">Agentic Onboarding</p>
-        <h1>Tell the tutor about yourself in your own words.</h1>
+        <p className="eyebrow">Getting Started</p>
+        <h1>Let&apos;s get to know each other.</h1>
         <p>
-          The onboarding agent asks dynamic follow-up questions, then automatically builds your
-          learner profile at the end.
+          Have a quick chat with your tutor so I can personalize everything to how you learn best.
         </p>
         <div className="buttonRow">
           <button
@@ -355,7 +354,7 @@ export default function OnboardingPage() {
             onClick={startConversation}
             disabled={networkState === "loading"}
           >
-            {hasConversation ? "Restart onboarding" : "Start onboarding"}
+            {hasConversation ? "Start over" : "Say hello"}
           </button>
           <Link href="/" className="ghostLink">
             Back to home
@@ -371,8 +370,7 @@ export default function OnboardingPage() {
                 &#128218;
               </div>
               <p>
-                Click <strong>&quot;Start onboarding&quot;</strong> above to begin a conversation
-                with the tutor.
+                Click <strong>&quot;Say hello&quot;</strong> above to start chatting with your tutor.
               </p>
             </div>
           ) : (
@@ -427,7 +425,7 @@ export default function OnboardingPage() {
                 className="btnSecondary"
                 onClick={finalizeOnboarding}
               >
-                Finish onboarding
+                All done — set up my profile
               </button>
             ) : null}
           </div>
@@ -435,7 +433,7 @@ export default function OnboardingPage() {
 
         {knownGaps.length > 0 ? (
           <div className="knownGapsCard">
-            <p>Still learning about:</p>
+            <p>I&apos;d still love to know:</p>
             <ul>
               {knownGaps.map((gap) => (
                 <li key={gap}>{gap}</li>
@@ -448,7 +446,7 @@ export default function OnboardingPage() {
 
         {finalResult ? (
           <div className="successBox">
-            <p>Onboarding complete for <strong>{finalResult.userId}</strong>.</p>
+            <p>You&apos;re all set, <strong>{finalResult.answers.displayName}</strong>!</p>
             <p>{summaryText}</p>
             <ul>
               {finalResult.updatedDocs.map((doc) => (
@@ -458,7 +456,7 @@ export default function OnboardingPage() {
               ))}
             </ul>
             <Link href={`/state/${encodeURIComponent(finalResult.userId)}`} className="ctaLink">
-              Open markdown state editor
+              View your profile
             </Link>
           </div>
         ) : null}
