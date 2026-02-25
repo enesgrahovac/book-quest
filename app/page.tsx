@@ -19,7 +19,10 @@ export default function HomePage() {
           learns how you learn.
         </p>
         <div className="buttonRow">
-          <Link href="/onboarding" className="ctaLink">
+          <Link href="/courses/new" className="ctaLink">
+            Create a course
+          </Link>
+          <Link href="/onboarding" className="ghostLink">
             Start onboarding
           </Link>
           <Link href="/state/local-learner" className="ghostLink">

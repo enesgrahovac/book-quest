@@ -4,7 +4,15 @@
       "Bash(cd \"/Users/enes/Documents/Software Development/book-quest\" && npm run lint 2>&1)",
       "Bash(cd \"/Users/enes/Documents/Software Development/book-quest\" && npm run typecheck 2>&1)",
       "Bash(cd \"/Users/enes/Documents/Software Development/book-quest\" && npm run build 2>&1)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "WebSearch",
+      "WebFetch(domain:sdk.vercel.ai)",
+      "WebFetch(domain:ai-sdk.dev)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(cd \"/Users/enes/Documents/Software Development/book-quest\" && npm install unpdf 2>&1)",
+      "Bash(head:*)"
     ]
   }
 }

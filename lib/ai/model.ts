@@ -5,6 +5,7 @@ const DEFAULT_MODEL = "openai:gpt-5.2";
 
 export function getModel() {
   const spec = process.env.LLM_MODEL ?? DEFAULT_MODEL;
+  console.log("spec", spec);
   const colonIndex = spec.indexOf(":");
   const provider = colonIndex > 0 ? spec.slice(0, colonIndex) : "openai";
   const modelId = colonIndex > 0 ? spec.slice(colonIndex + 1) : spec;
