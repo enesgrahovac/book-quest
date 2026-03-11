@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile, unlink } from "fs/promises";
 import path from "path";
 import type { BookAnalysis } from "@/lib/pdf/analyzeBook";
 
@@ -158,5 +158,54 @@ export async function readCoursePlan(
     return JSON.parse(content) as CoursePlan;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Course draft (auto-save in progress)
+// ---------------------------------------------------------------------------
+
+export type CourseDraft = {
+  messages: Array<{ role: "assistant" | "user"; content: string }>;
+  bookAnalysis: BookAnalysis | null;
+  courseId: string | null;
+  coursePlan: CoursePlan | null;
+  editablePlan: CoursePlan | null;
+  knownGaps: string[];
+  readyToGenerate: boolean;
+  requestingUpload: boolean;
+  savedAt: string;
+};
+
+function draftPath(userId: string) {
+  return path.join(userDir(userId), "_course_draft.json");
+}
+
+export async function saveCourseDraft(
+  userId: string,
+  draft: Omit<CourseDraft, "savedAt">
+): Promise<void> {
+  const dir = userDir(userId);
+  await mkdir(dir, { recursive: true });
+  const data: CourseDraft = { ...draft, savedAt: new Date().toISOString() };
+  await writeFile(draftPath(userId), JSON.stringify(data, null, 2), "utf8");
+}
+
+export async function readCourseDraft(
+  userId: string
+): Promise<CourseDraft | null> {
+  try {
+    const content = await readFile(draftPath(userId), "utf8");
+    return JSON.parse(content) as CourseDraft;
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteCourseDraft(userId: string): Promise<void> {
+  try {
+    await unlink(draftPath(userId));
+  } catch {
+    // already gone
   }
 }

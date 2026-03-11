@@ -123,8 +123,10 @@ export async function generateNextCourseQuestion(
     `Learning preferences:\n${docs.preferences.content}`,
     "",
     "Rules:",
-    "- Speak like a real person — warm, encouraging, and conversational.",
-    "- Ask exactly ONE question (or a closely related pair) per turn.",
+    "- Keep each response to 2-3 sentences max. Sound like a friend texting, not a textbook.",
+    "- Use line breaks between distinct thoughts.",
+    "- Ask exactly ONE question per turn.",
+    "- Never use bullet points or numbered lists in your responses.",
     "- Adapt based on what the learner has already shared.",
     "",
     bookAnalysis
@@ -407,7 +409,7 @@ export async function editCoursePlan(opts: {
       "- Keep unit numbers sequential.",
       "- If splitting a unit, create two new units with appropriate content.",
       "- If removing a unit, renumber the remaining units.",
-      "- Provide a short explanation of what you changed."
+      "- Provide a brief, conversational explanation (1-3 sentences, no bullet points) of what you changed."
     ].join("\n"),
     prompt: [
       `User instruction: "${userInstruction}"`,
@@ -416,7 +418,7 @@ export async function editCoursePlan(opts: {
       "",
       `Book analysis summary:\n${compactBookSummary(bookAnalysis)}`,
       "",
-      "Return the full updated plan with the requested changes applied."
+      "Return the full updated plan with the requested changes applied. Keep the explanation brief and friendly."
     ].join("\n"),
     temperature: 0.2,
     schema: z.object({

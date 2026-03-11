@@ -12,7 +12,8 @@
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:github.com)",
       "Bash(cd \"/Users/enes/Documents/Software Development/book-quest\" && npm install unpdf 2>&1)",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "Bash(tail:*)"
     ]
   }
 }

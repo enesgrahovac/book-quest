@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState, DragEvent } from "react";
+import ReactMarkdown from "react-markdown";
 
 import type { BookAnalysis } from "@/lib/pdf/analyzeBook";
 import type { CoursePlan } from "@/lib/state/courseFiles";
@@ -95,6 +96,20 @@ export default function CourseCreationPage() {
   // Editable plan state
   const [editablePlan, setEditablePlan] = useState<CoursePlan | null>(null);
 
+  // Draft persistence
+  const [pendingDraft, setPendingDraft] = useState<{
+    messages: ChatMessage[];
+    bookAnalysis: BookAnalysis | null;
+    courseId: string | null;
+    coursePlan: CoursePlan | null;
+    editablePlan: CoursePlan | null;
+    knownGaps: string[];
+    readyToGenerate: boolean;
+    requestingUpload: boolean;
+    savedAt: string;
+  } | null>(null);
+  const [draftChecked, setDraftChecked] = useState(false);
+
   const chatPanelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -129,6 +144,61 @@ export default function CourseCreationPage() {
       setEditablePlan(structuredClone(coursePlan));
     }
   }, [coursePlan, editablePlan]);
+
+  // Check for existing draft on mount
+  useEffect(() => {
+    fetch("/api/courses/draft")
+      .then((r) => r.json())
+      .then((data: { draft: typeof pendingDraft }) => {
+        if (data.draft && data.draft.messages.length > 0) {
+          setPendingDraft(data.draft);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setDraftChecked(true));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save draft when conversation state changes (debounced via idle network)
+  useEffect(() => {
+    if (!draftChecked || !messages.length || finalizedAt || networkState !== "idle") return;
+    const timer = setTimeout(() => {
+      fetch("/api/courses/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages,
+          bookAnalysis,
+          courseId,
+          coursePlan,
+          editablePlan,
+          knownGaps,
+          readyToGenerate,
+          requestingUpload,
+        }),
+      }).catch(() => {});
+    }, 1000);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, bookAnalysis, courseId, coursePlan, editablePlan, knownGaps, readyToGenerate, requestingUpload, networkState, finalizedAt, draftChecked]);
+
+  function resumeDraft() {
+    if (!pendingDraft) return;
+    setMessages(pendingDraft.messages);
+    setBookAnalysis(pendingDraft.bookAnalysis);
+    setCourseId(pendingDraft.courseId);
+    setCoursePlan(pendingDraft.coursePlan);
+    setEditablePlan(pendingDraft.editablePlan);
+    setKnownGaps(pendingDraft.knownGaps);
+    setReadyToGenerate(pendingDraft.readyToGenerate);
+    setRequestingUpload(pendingDraft.requestingUpload ?? false);
+    setPendingDraft(null);
+  }
+
+  function dismissDraft() {
+    setPendingDraft(null);
+    fetch("/api/courses/draft", { method: "DELETE" }).catch(() => {});
+  }
 
   // ---------------------------------------------------------------------------
   // SSE streaming
@@ -488,6 +558,14 @@ export default function CourseCreationPage() {
       const result = (await response.json()) as { plan: CoursePlan };
       setCoursePlan(result.plan);
       setEditablePlan(structuredClone(result.plan));
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content:
+            "Here's your course plan! Take a look and let me know if you'd like any changes — you can ask me to add, remove, rename, or rearrange anything."
+        }
+      ]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Plan generation failed.");
     } finally {
@@ -521,6 +599,8 @@ export default function CourseCreationPage() {
       const result = (await response.json()) as { savedAt: string };
       setFinalizedAt(result.savedAt);
       setCoursePlan(editablePlan);
+      // Clear draft on finalize
+      fetch("/api/courses/draft", { method: "DELETE" }).catch(() => {});
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to save course.");
     } finally {
@@ -528,10 +608,7 @@ export default function CourseCreationPage() {
     }
   }
 
-  function regeneratePlan() {
-    setCoursePlan(null);
-    setEditablePlan(null);
-  }
+  // regeneratePlan removed — users edit via chat instead
 
   // ---------------------------------------------------------------------------
   // Plan editing helpers
@@ -578,27 +655,44 @@ export default function CourseCreationPage() {
   // Render
   // ---------------------------------------------------------------------------
 
-  const showTwoColumn = Boolean(editablePlan) && !finalizedAt;
+  const showTwoColumn = (Boolean(editablePlan) || planGenerating) && !finalizedAt;
 
   return (
-    <main className={`page${showTwoColumn ? " twoColumn" : ""}`}>
-      <section className="hero">
-        <p className="eyebrow">Course Creation</p>
-        <h1>Let&apos;s build your course.</h1>
-        <p>
-          Chat with your tutor, share your study materials, and get a personalized course plan.
-        </p>
-        <div className="buttonRow">
+    <main className={`page courseCreationPage${showTwoColumn ? " twoColumn" : ""}`}>
+      <header className="courseHeader">
+        <div className="courseHeaderLeft">
+          <Link href="/" className="courseBackLink" aria-label="Back to home">&larr;</Link>
+          <div>
+            <p className="eyebrow">Course Creation</p>
+            <h1>Let&apos;s build your course.</h1>
+          </div>
+        </div>
+        <div className="courseHeaderActions">
           <button type="button" onClick={startConversation} disabled={networkState === "loading"}>
             {hasConversation ? "Start over" : "Get started"}
           </button>
-          <Link href="/" className="ghostLink">
-            Back to home
-          </Link>
         </div>
-      </section>
+      </header>
 
-      <div className={showTwoColumn ? "chatColumn" : undefined}>
+      {pendingDraft && !hasConversation ? (
+        <div className="draftResumeCard">
+          <p>
+            You have an in-progress course from{" "}
+            <strong>{new Date(pendingDraft.savedAt).toLocaleString()}</strong>
+          </p>
+          <div className="buttonRow">
+            <button type="button" onClick={resumeDraft}>
+              Resume
+            </button>
+            <button type="button" className="btnSecondary" onClick={dismissDraft}>
+              Start fresh
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className={showTwoColumn ? "columnsWrapper" : "chatColumnSingle"}>
+      <div className="chatColumn">
 
       <section className="formCard">
         <div className="chatPanel" ref={chatPanelRef}>
@@ -622,7 +716,9 @@ export default function CourseCreationPage() {
                   <span className="chatRoleIcon">{message.role === "assistant" ? "T" : "Y"}</span>
                   {message.role === "assistant" ? "Tutor" : "You"}
                 </p>
-                <p>{message.content}</p>
+                <div className="chatMessageContent">
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                </div>
               </article>
             ))
           )}
@@ -774,10 +870,40 @@ export default function CourseCreationPage() {
 
       </div>
 
+      {/* Skeleton loading state */}
+      {planGenerating && !editablePlan && !finalizedAt ? (
+        <div className="planColumn">
+          <section className="planCard">
+            <h2 className="planColumnHeading">Course Plan</h2>
+            <div className="planHeader">
+              <div className="skeleton skeletonTitle" />
+              <div className="skeleton skeletonDescription" />
+              <div style={{ display: "flex", gap: "var(--space-3)" }}>
+                <div className="skeleton skeletonBadge" />
+                <div className="skeleton skeletonBadge" />
+                <div className="skeleton skeletonBadge" />
+              </div>
+            </div>
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="unitCard" style={{ opacity: 1 - i * 0.15 }}>
+                <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                  <div className="skeleton skeletonBadge" />
+                  <div className="skeleton skeletonBadge" />
+                </div>
+                <div className="skeleton skeletonLine" style={{ width: "70%" }} />
+                <div className="skeleton skeletonLine" style={{ width: "100%" }} />
+                <div className="skeleton skeletonLine" style={{ width: "85%" }} />
+              </div>
+            ))}
+          </section>
+        </div>
+      ) : null}
+
       {/* Plan review card */}
       {editablePlan && !finalizedAt ? (
         <div className="planColumn">
           <section className="planCard">
+            <h2 className="planColumnHeading">Course Plan</h2>
             <div className="planHeader">
               <label>
                 Course title
@@ -836,16 +962,14 @@ export default function CourseCreationPage() {
                   />
                 </label>
                 <div className="objectivesList">
-                  <p style={{ fontWeight: "var(--weight-semibold)", fontSize: "var(--text-sm)", margin: "0 0 var(--space-1)" }}>
-                    Objectives
-                  </p>
+                  <p>Objectives</p>
                   {unit.objectives.map((obj, oi) => (
                     <input
                       key={oi}
                       type="text"
                       value={obj}
                       onChange={(e) => updateUnitObjective(ui, oi, e.target.value)}
-                      style={{ fontSize: "var(--text-sm)", padding: "var(--space-1) var(--space-2)" }}
+                      placeholder={`Objective ${oi + 1}`}
                     />
                   ))}
                 </div>
@@ -856,24 +980,23 @@ export default function CourseCreationPage() {
               <button type="button" onClick={finalizePlan} disabled={networkState === "loading"}>
                 {networkState === "loading" ? "Saving..." : "Approve & create course"}
               </button>
-              <button type="button" className="btnSecondary" onClick={regeneratePlan}>
-                Regenerate
-              </button>
             </div>
           </section>
         </div>
       ) : null}
 
+      </div>
+
       {/* Success state */}
       {finalizedAt ? (
-        <section className="successBox" style={{ marginTop: "var(--space-6)" }}>
+        <section className="successBox">
           <p>
             Your course <strong>{coursePlan?.title}</strong> has been created!
           </p>
-          <p style={{ fontSize: "var(--text-sm)" }}>
+          <p className="successMeta">
             Saved at {new Date(finalizedAt).toLocaleString()}
           </p>
-          <Link href="/" className="ctaLink" style={{ marginTop: "var(--space-3)" }}>
+          <Link href="/" className="ctaLink">
             Back to home
           </Link>
         </section>
